@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# agentos: small CLI for the agentos setup.
+#   agentos status            fleet summary: conductors, sessions, heartbeats
+#   agentos doctor            verify install health (exit 1 on any failure)
+#   agentos notify T [BODY]   local escalation (macOS notification, else terminal bell)
+#   agentos update            git pull the repo and re-run install.sh
+#   agentos uninstall [--purge]
+set -uo pipefail
+
+SELF="$(readlink "$0" 2>/dev/null || echo "$0")"
+case "$SELF" in /*) ;; *) SELF="$(cd "$(dirname "$0")" && cd "$(dirname "$SELF")" && pwd)/$(basename "$SELF")";; esac
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
+# shellcheck source=../lib/common.sh
+. "$REPO/lib/common.sh"
+# shellcheck source=../versions.env
+. "$REPO/versions.env"
+
+CONDUCTOR_ROOT="$HOME/.agent-deck/conductor"
+
+cmd_status() {
+  if ! have agent-deck; then err "agent-deck not installed"; return 1; fi
+  step "agent-deck $(agent-deck --version 2>/dev/null | awk '{print $NF}')"
+  agent-deck status 2>/dev/null || true
+  step "Conductors"
+  agent-deck conductor list 2>/dev/null || note "(none)"
+  local d name hb age
+  for d in "$CONDUCTOR_ROOT"/*/; do
+    [ -f "$d/meta.json" ] || continue
+    name="$(basename "$d")"
+    hb="$d/heartbeat.log"
+    if [ -s "$hb" ]; then
+      age=$(( $(date +%s) - $(stat -c %Y "$hb" 2>/dev/null || stat -f %m "$hb") ))
+      note "$name: last heartbeat $((age / 60))m ago; log entries: $(grep -c '' "$d/task-log.md" 2>/dev/null || echo 0) lines"
+    else
+      note "$name: no heartbeat recorded yet"
+    fi
+  done
+}
+
+cmd_doctor() {
+  local fail=0 v
+  check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else err "$1${3:+ — $3}"; fail=1; fi; }
+  soft()  { if eval "$2" >/dev/null 2>&1; then ok "$1"; else warn "$1${3:+ — $3}"; fi; }
+
+  step "Binaries"
+  for b in git tmux jq agent-deck claude; do check "$b on PATH" "have $b" "run ./install.sh"; done
+  soft "gh on PATH" "have gh"
+  if have agent-deck; then
+    v="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    check "agent-deck $v >= $AGENT_DECK_MIN" "version_ge '$v' '$AGENT_DECK_MIN'" "brew upgrade agent-deck"
+  fi
+
+  step "Config"
+  check "agent-deck config (XDG)" "[ -f '$HOME/.config/agent-deck/config.toml' ]"
+  check "agent-deck config parses" "agent-deck conductor list --json"
+  soft  "config matches repo" "cmp -s <(sed -e 's|__HOME__|$HOME|g' '$REPO/agent-deck/config.toml') '$HOME/.config/agent-deck/config.toml'" \
+        "the TUI rewrote it; diff with the repo copy and commit what you want to keep"
+  check "ghostty config linked" "[ \"\$(readlink '$HOME/.config/ghostty/config')\" = '$REPO/ghostty/config' ]"
+  check "~/.claude/settings.json valid JSON" "jq -e . '$HOME/.claude/settings.json'"
+  soft  "agent-deck Claude hooks installed" "jq -e '.hooks // {} | tostring | test(\"agent-deck\")' '$HOME/.claude/settings.json'" \
+        "launch the TUI once (agent-deck) and accept the hooks prompt"
+
+  step "Conductors"
+  local d name
+  for d in "$CONDUCTOR_ROOT"/*/; do
+    [ -f "$d/meta.json" ] || continue
+    name="$(basename "$d")"
+    check "$name: meta.json" "jq -e . '$d/meta.json'"
+    check "$name: agentos hooks wired" "jq -e '.hooks.Stop' '$d/.claude/settings.json'"
+    check "$name: heartbeat enabled" "jq -e '.heartbeat_enabled == true' '$d/meta.json'"
+    if is_macos; then
+      soft "$name: heartbeat launchd job loaded" "launchctl list | grep -q 'com.agentdeck.conductor-heartbeat.$name'" \
+           "agent-deck conductor setup $name --json   (re-installs the plist)"
+    fi
+    soft "$name: heartbeat fired (log non-empty)" "[ -s '$d/heartbeat.log' ]" "wait one interval, or check: agent-deck conductor status $name"
+  done
+
+  step "Auth"
+  soft "gh authenticated" "gh auth status" "gh auth login"
+  soft "claude authenticated" "[ -n \"\${ANTHROPIC_API_KEY:-}\" ] || [ -f '$HOME/.claude/.credentials.json' ] || { is_macos && security find-generic-password -s 'Claude Code-credentials'; }" "run: claude  (then /login)"
+
+  echo
+  if [ $fail = 0 ]; then ok "doctor: healthy"; else err "doctor: problems found"; fi
+  return $fail
+}
+
+cmd_notify() {
+  local title="${1:-agentos}" body="${2:-}"
+  if have terminal-notifier; then
+    terminal-notifier -title "$title" -message "${body:- }" -sound default -group agentos >/dev/null 2>&1 && return 0
+  fi
+  if is_macos && have osascript; then
+    osascript -e "display notification \"${body//\"/\\\"}\" with title \"${title//\"/\\\"}\"" >/dev/null 2>&1 && return 0
+  fi
+  printf '\a[%s] %s\n' "$title" "$body" >&2
+}
+
+case "${1:-status}" in
+  status)    shift; cmd_status "$@" ;;
+  doctor)    shift; cmd_doctor "$@" ;;
+  notify)    shift; cmd_notify "$@" ;;
+  update)    shift; git -C "$REPO" pull --ff-only && exec "$REPO/install.sh" "$@" ;;
+  uninstall) shift; exec "$REPO/install.sh" --uninstall "$@" ;;
+  -h|--help|help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) err "unknown command: $1"; exit 2 ;;
+esac

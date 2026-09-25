@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(agent-deck status *)",
+      "Bash(agent-deck list *)",
+      "Bash(agent-deck session show *)",
+      "Bash(agent-deck session output *)",
+      "Bash(agent-deck session children *)",
+      "Bash(agent-deck recall search *)",
+      "Bash(agentos status)",
+      "Bash(agentos doctor)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git worktree list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  }
+}

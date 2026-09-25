@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# agentos-conductor-hook: Claude Code hook for agent-deck conductor sessions.
+#
+# Wired into ~/.agent-deck/conductor/<name>/.claude/settings.json by install.sh.
+# Makes conductor memory deterministic instead of relying on the model to follow
+# "maintain state.json" instructions:
+#
+#   SessionStart      bootstrap state.json/task-log.md, then inject state + recent
+#                     log + active learnings as additionalContext
+#   UserPromptSubmit  record turn start (for the Stop check) and heartbeat marks
+#   Stop              refresh state.json.fleet; block once if the turn didn't
+#                     append to task-log.md (AGENTOS_ENFORCE_TASKLOG=0 disables)
+#   SessionEnd        record the event
+#
+# Reads the hook JSON on stdin. Never fails the session: any internal error exits 0.
+
+set -uo pipefail
+
+INPUT="$(cat)"
+jqr() { printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null; }
+
+EVENT="$(jqr '.hook_event_name // empty')"
+CWD="$(jqr '.cwd // empty')"
+DIR="${AGENTOS_CONDUCTOR_DIR:-${CWD:-$PWD}}"
+cd "$DIR" 2>/dev/null || exit 0
+command -v jq >/dev/null || exit 0
+
+STATE=state.json
+LOG=task-log.md
+EVENTS=events.jsonl
+META_DIR=.agentos
+mkdir -p "$META_DIR"
+
+NAME="$(jq -r '.name // empty' meta.json 2>/dev/null)"
+[ -n "$NAME" ] || NAME="$(basename "$DIR")"
+PROFILE="$(jq -r '.profile // "default"' meta.json 2>/dev/null)"
+[ -n "$PROFILE" ] || PROFILE=default
+AD=(agent-deck)
+[ "$PROFILE" != default ] && AD=(agent-deck -p "$PROFILE")
+
+now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+now_s()   { date +%s; }
+mtime()   { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+
+# Bounded agent-deck call: timeout(1)/gtimeout if present, else plain.
+ad_json() {
+  local t=""
+  command -v timeout >/dev/null && t="timeout 8"
+  command -v gtimeout >/dev/null && t="gtimeout 8"
+  $t "${AD[@]}" "$@" 2>/dev/null
+}
+
+ensure_files() {
+  if ! jq -e . "$STATE" >/dev/null 2>&1; then
+    [ -f "$STATE" ] && cp "$STATE" "$META_DIR/state.json.corrupt.$(now_s)"
+    jq -n --arg n "$NAME" --arg p "$PROFILE" --arg t "$(now_iso)" \
+      '{conductor:$n, profile:$p, created_at:$t, sessions:{}, last_heartbeat:null,
+        auto_responses_today:0, escalations_today:0}' >"$STATE"
+  fi
+  if [ ! -f "$LOG" ]; then
+    printf '# Task Log: conductor-%s\n\n' "$NAME" >"$LOG"
+  fi
+}
+
+# Merge a machine-owned snapshot into state.json.fleet (atomic replace).
+refresh_fleet() {
+  local counts tmp
+  counts="$(ad_json status --json)"
+  printf '%s' "$counts" | jq -e . >/dev/null 2>&1 || counts='null'
+  tmp="$(mktemp "$META_DIR/state.XXXXXX")"
+  if jq --argjson c "$counts" --arg t "$(now_iso)" --arg e "$1" \
+      '.fleet = {updated_at:$t, by_event:$e, counts:$c}' "$STATE" >"$tmp" 2>/dev/null; then
+    mv "$tmp" "$STATE"
+  else
+    rm -f "$tmp"
+  fi
+}
+
+event() {
+  jq -cn --arg t "$(now_iso)" --arg e "$1" --arg d "${2:-}" '{ts:$t, event:$e, detail:$d}' >>"$EVENTS"
+}
+
+learnings_active() {
+  # Entries only (skip the template header), then keep only active ones.
+  local f
+  for f in ../LEARNINGS.md ./LEARNINGS.md; do
+    [ -f "$f" ] || continue
+    awk -v src="$f" '
+      /^### \[/ { if (buf != "" && buf !~ /Status\*\*: *(retired|promoted)/) print buf; buf = "(" src ") " $0 "\n"; next }
+      buf != "" { buf = buf $0 "\n" }
+      END { if (buf != "" && buf !~ /Status\*\*: *(retired|promoted)/) print buf }
+    ' "$f"
+  done
+}
+
+case "$EVENT" in
+  SessionStart)
+    ensure_files
+    SRC="$(jqr '.source // "startup"')"
+    refresh_fleet "SessionStart:$SRC"
+    event SessionStart "$SRC"
+    CTX="$(
+      printf '## AgentOS restored context (conductor-%s, source=%s)\n\n' "$NAME" "$SRC"
+      printf '### ./state.json\n```json\n'; head -c 6000 "$STATE"; printf '\n```\n\n'
+      printf '### ./task-log.md (last 60 lines)\n```\n'; tail -n 60 "$LOG"; printf '\n```\n\n'
+      L="$(learnings_active | head -c 4000)"
+      if [ -n "$L" ]; then printf '### Active learnings\n%s\n' "$L"; else printf '### Active learnings\n(none yet)\n'; fi
+      printf '\nThe Stop hook blocks the end of a turn once if ./task-log.md was not appended during that turn.\n'
+    )"
+    jq -n --arg c "$CTX" '{hookSpecificOutput:{hookEventName:"SessionStart", additionalContext:$c}}'
+    ;;
+
+  UserPromptSubmit)
+    ensure_files
+    now_s >"$META_DIR/turn-start"
+    PROMPT="$(jqr '.prompt // ""')"
+    case "$PROMPT" in
+      *HEARTBEAT*|Heartbeat:*)
+        tmp="$(mktemp "$META_DIR/state.XXXXXX")"
+        jq --arg t "$(now_iso)" '.last_heartbeat = $t' "$STATE" >"$tmp" 2>/dev/null && mv "$tmp" "$STATE" || rm -f "$tmp"
+        event heartbeat_received ""
+        ;;
+    esac
+    ;;
+
+  Stop)
+    ensure_files
+    refresh_fleet Stop
+    ACTIVE="$(jqr '.stop_hook_active // false')"
+    START="$(cat "$META_DIR/turn-start" 2>/dev/null || echo 0)"
+    LOGM="$(mtime "$LOG")"
+    if [ "${AGENTOS_ENFORCE_TASKLOG:-1}" = 1 ] && [ "$ACTIVE" != true ] && [ "$START" -gt 0 ] && [ "$LOGM" -lt "$START" ]; then
+      event stop_blocked "task-log not updated this turn"
+      jq -n '{decision:"block", reason:"AgentOS: before ending this turn, append a short entry to ./task-log.md (## <timestamp> - <what triggered this turn>, then bullets of what you did or decided). If session summaries changed, update ./state.json .sessions too. If something LEARNINGS-worthy happened, add an entry to ./LEARNINGS.md. Then stop."}'
+      exit 0
+    fi
+    event turn_end ""
+    ;;
+
+  SessionEnd)
+    event SessionEnd "$(jqr '.reason // ""')"
+    ;;
+esac
+exit 0

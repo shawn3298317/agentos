@@ -1,0 +1,28 @@
+# Never commit machine state or secrets.
+.env
+*.env
+!versions.env
+secrets.local
+*.pem
+*.key
+.DS_Store
+# agent-deck runtime state, if it's ever copied in here by accident
+state.db*
+recall.db*
+*.log
+*.log.gz
+cost-events/
+runtime/
+hooks/*.sid
+update-cache.json
+**/state.json
+**/task-log.md
+**/events.jsonl
+.agentos/
+# Claude Code local state
+claude/**/settings.local.json
+claude/projects/
+claude/todos/
+claude/statsig/
+claude/shell-snapshots/
+claude/.credentials.json

@@ -1,0 +1,47 @@
+# Proves the one-command install on both targets on every push:
+#   linux: bare Ubuntu container, full e2e suite (test/e2e.sh)
+#   macos: real Homebrew + casks + launchd heartbeat daemons, then uninstall --purge
+name: install
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -S error install.sh bootstrap.sh bin/* scripts/*.sh lib/common.sh test/*.sh
+      - name: e2e in a fresh container
+        run: test/run.sh
+
+  macos-smoke:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: install (system bash 3.2, like a fresh Mac)
+        run: /bin/bash ./install.sh
+      - name: doctor
+        run: |
+          export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
+          agentos doctor
+      - name: launchd heartbeat jobs loaded
+        run: launchctl list | grep -E 'com.agentdeck.conductor-heartbeat.(fleet-spawner|reviewer)'
+      - name: ghostty + font installed
+        run: |
+          test -d /Applications/Ghostty.app
+          ls ~/Library/Fonts /Library/Fonts 2>/dev/null | grep -i jetbrains
+      - name: conductor hook runs under /bin/bash 3.2
+        run: |
+          D=~/.agent-deck/conductor/fleet-spawner
+          echo "{\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"cwd\":\"$D\"}" \
+            | ~/.local/bin/agentos-conductor-hook | jq -e '.hookSpecificOutput.additionalContext'
+      - name: idempotent
+        run: /bin/bash ./install.sh --no-packages
+      - name: uninstall --purge
+        run: |
+          /bin/bash ./install.sh --uninstall --purge
+          test ! -e ~/.agent-deck
+          ! launchctl list | grep -q com.agentdeck.conductor-heartbeat

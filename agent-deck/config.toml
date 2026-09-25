@@ -1,0 +1,54 @@
+# agent-deck config (managed by agentos — edit in the repo, then re-run ./install.sh)
+# Rendered to ~/.config/agent-deck/config.toml. The XDG path wins over the legacy
+# ~/.agent-deck/config.toml, so an old config on this machine is ignored (and backed up).
+# Only settings that differ from agent-deck defaults are listed; the TUI (press S)
+# fills the rest in when it saves. Requires agent-deck >= 1.16.
+
+default_tool = "claude"
+theme = "dark"
+
+[claude]
+  # Explicit: agent-deck defaults dangerous_mode to TRUE when unset.
+  # Default to Claude's auto permission mode (classifier approves routine
+  # actions, prompts on risky ones). Bypass stays available per session
+  # (--skip-permissions / TUI toggle) because allow_dangerous_mode is on.
+  dangerous_mode = false
+  allow_dangerous_mode = true
+  auto_mode = true
+  # Lifecycle hooks give instant, deterministic status (vs. tmux polling).
+  hooks_enabled = true
+  auto_resume_summary = true
+
+[worktree]
+  # Never delete a worktree just because its session was removed from the registry.
+  auto_cleanup = false
+  # <repo>/.worktrees/<branch>, which matches the existing layout.
+  default_location = "subdirectory"
+  # Explicit -w branches are used verbatim only when the prefix is empty (the
+  # default "feature/" turns `-w deck/x` into `feature/deck/x`). Conductors pass deck/<slug>.
+  branch_prefix = ""
+  # Repo-supplied .agent-deck/worktree-*.sh scripts run only after a one-time approval.
+  run_repo_scripts = "prompt"
+
+[recall]
+  # Cross-session memory: FTS index over every Claude transcript (TUI `G`,
+  # `agent-deck recall search`). Hints/annotations work regardless.
+  enabled = true
+
+[conductor]
+  enabled = true
+  # Pin the conductor root so the instructions, hooks and scripts that reference
+  # ~/.agent-deck/conductor are correct on every machine (XDG data dir otherwise).
+  dir = "~/.agent-deck/conductor"
+  heartbeat_interval = 15
+
+[updates]
+  # Version is pinned by agentos (versions.env); upgrade deliberately, not mid-demo.
+  auto_update = false
+  check_enabled = true
+  check_interval_hours = 24
+
+[logs]
+  max_size_mb = 10
+  max_lines = 10000
+  remove_orphans = true
