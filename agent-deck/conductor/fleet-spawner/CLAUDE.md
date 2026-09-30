@@ -57,6 +57,8 @@ Read `./tasks.json` for a list of sessions to spawn. Format:
       "repo": "/absolute/path/to/repo",
       "slug": "fix-auth-middleware",
       "message": "Fix the auth token refresh bug in the middleware layer",
+      "harness": "claude",
+      "model": "",
       "mode": "auto"
     }
   ]
@@ -69,24 +71,35 @@ For each task:
 3. Use `deck/<slug>` as the worktree branch
 4. Permission mode: `auto` unless the task says otherwise. `bypassPermissions` only when the task
    explicitly asks for it. Never choose bypass on your own (POLICY rule 7).
-5. Spawn with:
+5. Pick the coding harness (`harness`, default `claude`). The user may name it inline
+   ("spawn a codex session for …", "use gemini for the docs task"). Supported: `claude`,
+   `codex`, `gemini`, `opencode`, plus anything else `agent-deck launch -c` accepts. If the named
+   harness isn't installed (`command -v <harness>` fails), say so and ask before
+   falling back to claude. Pass `--model <model>` when the task or user names one.
+6. Spawn with:
    ```bash
    agent-deck launch <repo> \
-     -c claude <MODE_FLAG> \
+     -c <harness> <MODE_FLAG> [--model <model>] \
      -w "deck/<slug>" -b \
      -g "<group>" \
      -t "<slug>" \
      --hint purpose="<one-line task summary>" \
      [-m "<message>"]
    ```
-   where `<MODE_FLAG>` is `--auto-mode` for `auto`, `--skip-permissions` for `bypassPermissions`,
-   and nothing for `default`. Launching from this session links the child to you automatically
+   where `<MODE_FLAG>` depends on the harness:
+   | mode | claude | codex / gemini |
+   |---|---|---|
+   | `auto` (default) | `--auto-mode` | *(none; harness default approvals)* |
+   | `bypassPermissions` | `--skip-permissions` | `--yolo` |
+   | `default` | *(none)* | *(none)* |
+
+   Launching from this session links the child to you automatically
    (parent/child), so `session children` and transition notifications work.
-6. If `launch` exits non-zero, don't retry blindly. Read the error, log it, and report it.
+7. If `launch` exits non-zero, don't retry blindly. Read the error, log it, and report it.
    `session send`/`launch` exit codes are truthful about delivery in 1.16.
-7. After spawning, update `./state.json` with the session ID and status
-8. Log the action in `./task-log.md`
-9. Mark the task as spawned in tasks.json (add `"status": "spawned"`)
+8. After spawning, update `./state.json` with the session ID and status
+9. Log the action in `./task-log.md`
+10. Mark the task as spawned in tasks.json (add `"status": "spawned"`)
 
 ### Mode 2: User-directed (conversational)
 
@@ -94,11 +107,12 @@ When the user sends you a message like:
 - "Spawn 3 sessions on ~/repos/api for: fix auth, add rate limiting, refactor db"
 - "Launch a fleet on these repos: ~/repos/api, ~/repos/frontend, ~/repos/infra"
 - "Decompose this feature across repos: <description>"
+- "Spin up a codex session on ~/repos/api called fix-retry: <task>" (named harness + slug)
 
 You should:
 1. Parse the intent: identify the repos, the tasks, and any explicit slugs
 2. Derive semantic slugs for any tasks without explicit names (2-4 words, lowercase, hyphenated)
-3. Present the spawn plan to the user for confirmation (repo, slug, branch, mode, first message)
+3. Present the spawn plan to the user for confirmation (repo, slug, branch, harness, mode, first message)
 4. Execute the launches sequentially
 5. Report results: what spawned, session IDs, any failures
 
