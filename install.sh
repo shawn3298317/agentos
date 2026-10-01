@@ -277,6 +277,21 @@ if [ "$CONDUCTORS" = 1 ]; then
       ' "$d/.claude/settings.json" "$CDIR/claude-hooks.json" >"$d/.claude/settings.json.tmp" \
         && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json"
       ok "conductor $name: agentos hooks wired"
+      # Optional per-conductor permission overlay. Its allow entries are lifted out of
+      # agent-deck's managed ask list; its ask entries are re-added (ask beats allow in
+      # Claude Code, so narrower ask patterns still gate risky variants).
+      P="$CDIR/$name/permissions.json"
+      if [ -f "$P" ]; then
+        jq -S -s '
+          def uniq_arr: reduce .[] as $x ([]; if index([$x]) then . else . + [$x] end);
+          .[0] as $cur | .[1].permissions as $o
+          | $cur
+          | .permissions.allow = (((($cur.permissions.allow // []) + ($o.allow // []))) | uniq_arr)
+          | .permissions.ask = (((($cur.permissions.ask // []) - ($o.allow // [])) + ($o.ask // [])) | uniq_arr)
+        ' "$d/.claude/settings.json" "$P" >"$d/.claude/settings.json.tmp" \
+          && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json"
+        ok "conductor $name: permission overlay applied"
+      fi
       manifest_add "conductor	$name"
     fi
   done <"$CDIR/conductors.conf"
