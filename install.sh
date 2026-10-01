@@ -122,7 +122,12 @@ install_packages_macos() {
     [ -x /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
   fi
   step "brew bundle"
-  HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --file="$AGENTOS_REPO/Brewfile"
+  HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --no-upgrade --file="$AGENTOS_REPO/Brewfile" \
+    || warn "brew bundle reported failures (Tier 3 source builds?); continuing, version check below is the gate"
+  # Brewfile skips agent-deck on Intel; also covers a failed brew build.
+  local adv=""
+  have agent-deck && adv="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [ -z "$adv" ] || ! version_ge "$adv" "$AGENT_DECK_MIN"; then install_agent_deck_release; fi
 }
 
 install_agent_deck_release() {
