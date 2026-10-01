@@ -26,3 +26,5 @@ claude/todos/
 claude/statsig/
 claude/shell-snapshots/
 claude/.credentials.json
+__pycache__/
+*.pyc

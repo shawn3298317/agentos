@@ -1,0 +1,35 @@
+{
+  "_comment": "Upstream prompts vendored verbatim at pinned commits. Refresh deliberately: edit sha here, run scripts/fetch_vendor.py, review the diff.",
+  "vendor": {
+    "superpowers-code-reviewer.md": {
+      "repo": "obra/superpowers",
+      "sha": "8ca22dba9a94",
+      "path": "skills/requesting-code-review/code-reviewer.md",
+      "license": "MIT"
+    },
+    "security-review.md": {
+      "repo": "anthropics/claude-code-security-review",
+      "sha": "0c6a49f1fa56",
+      "path": ".claude/commands/security-review.md",
+      "license": "MIT"
+    },
+    "ponytail-review.md": {
+      "repo": "DietrichGebert/ponytail",
+      "sha": "e3ba2aa6f1e6",
+      "path": "skills/ponytail-review/SKILL.md",
+      "license": "MIT"
+    },
+    "rev-reviewer.md": {
+      "repo": "WiktorStarczewski/review-council",
+      "sha": "25e0407a61f5",
+      "path": "plugins/review-council/agents/rev-reviewer.md",
+      "license": "MIT"
+    }
+  },
+  "sha256": {
+    "superpowers-code-reviewer.md": "5c7211ea7cdb44ed63c9ebd6e1c5f63cfeb1c708e1d29acded318b836d2c8ae8",
+    "security-review.md": "dd1d451f909dbb8798f4a4de010c35e7dd9152f02bb2f7988442cdd138f29e39",
+    "ponytail-review.md": "c94db41b601856b79a9b391f0e33de3cbbcf2426515e51bf5b69ab5f3069a504",
+    "rev-reviewer.md": "ea268533ee9d9506468ee74dff0afa6ee36bb51d7c09dfbf917e1168b66e3883"
+  }
+}
