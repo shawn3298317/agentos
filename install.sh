@@ -122,7 +122,20 @@ install_packages_macos() {
     [ -x /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
   fi
   step "brew bundle"
-  HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --file="$AGENTOS_REPO/Brewfile"
+  # Homebrew >= 7 refuses formulae from non-official taps until trusted. Trust only the one
+  # formula the Brewfile installs (arm64 only), not the whole tap.
+  if [ "$(uname -m)" = arm64 ] && brew trust --help >/dev/null 2>&1; then
+    run brew trust --formula asheshgoplani/tap/agent-deck || warn "brew trust failed; brew bundle may refuse agent-deck"
+  fi
+  HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --no-upgrade --file="$AGENTOS_REPO/Brewfile" \
+    || warn "brew bundle reported failures (Tier 3 source builds?); continuing with what installed"
+  # Everything below needs these; fail here rather than half-install dotfiles.
+  local b
+  for b in git tmux jq; do have "$b" || die "$b missing after brew bundle; fix with: brew install $b"; done
+  # Brewfile skips agent-deck on Intel; also covers a failed brew build.
+  local adv=""
+  have agent-deck && adv="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [ -z "$adv" ] || ! version_ge "$adv" "$AGENT_DECK_MIN"; then install_agent_deck_release; fi
 }
 
 install_agent_deck_release() {
@@ -136,7 +149,8 @@ install_agent_deck_release() {
   step "agent-deck $v from GitHub release"
   if [ "$DRY_RUN" = 1 ]; then note "[dry-run] curl $url"; return 0; fi
   tmp="$(mktemp -d)"
-  curl -fsSL "$url" -o "$tmp/ad.tgz" || die "download failed: $url"
+  # GitHub release downloads intermittently 5xx; retry before giving up.
+  curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors "$url" -o "$tmp/ad.tgz" || die "download failed: $url"
   tar -xzf "$tmp/ad.tgz" -C "$tmp" agent-deck
   mkdir -p "$BIN_DIR"; install -m 0755 "$tmp/agent-deck" "$BIN_DIR/agent-deck"; rm -rf "$tmp"
   ok "installed $BIN_DIR/agent-deck"
@@ -173,7 +187,7 @@ step "Version check"
 if have agent-deck; then
   ADV="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
   if version_ge "$ADV" "$AGENT_DECK_MIN"; then ok "agent-deck $ADV (>= $AGENT_DECK_MIN)"
-  else die "agent-deck $ADV is older than $AGENT_DECK_MIN; run: brew upgrade agent-deck"; fi
+  else die "agent-deck $ADV at $(command -v agent-deck) is older than $AGENT_DECK_MIN; remove it or put $BIN_DIR first on PATH, then re-run ./install.sh"; fi
 else
   [ "$DRY_RUN" = 1 ] && warn "agent-deck not installed (dry-run)" || die "agent-deck not installed"
 fi
@@ -272,6 +286,22 @@ if [ "$CONDUCTORS" = 1 ]; then
       ' "$d/.claude/settings.json" "$CDIR/claude-hooks.json" >"$d/.claude/settings.json.tmp" \
         && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json"
       ok "conductor $name: agentos hooks wired"
+      # Optional per-conductor permission overlay. Its allow entries are lifted out of
+      # agent-deck's managed ask list; its ask entries are re-added (ask beats allow in
+      # Claude Code, so narrower ask patterns still gate risky variants).
+      P="$CDIR/$name/permissions.json"
+      if [ -f "$P" ]; then
+        jq -S -s '
+          def uniq_arr: reduce .[] as $x ([]; if index([$x]) then . else . + [$x] end);
+          .[0] as $cur | .[1].permissions as $o
+          | $cur
+          | .permissions.allow = (((($cur.permissions.allow // []) + ($o.allow // []))) | uniq_arr)
+          | .permissions.ask = (((($cur.permissions.ask // []) - ($o.allow // [])) + ($o.ask // [])) | uniq_arr)
+        ' "$d/.claude/settings.json" "$P" >"$d/.claude/settings.json.tmp" \
+          && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json" \
+          && ok "conductor $name: permission overlay applied" \
+          || { rm -f "$d/.claude/settings.json.tmp"; warn "conductor $name: permission overlay failed to merge ($P)"; }
+      fi
       manifest_add "conductor	$name"
     fi
   done <"$CDIR/conductors.conf"

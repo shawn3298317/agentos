@@ -1,0 +1,13 @@
+{
+  "_comment": "Merged into this conductor's .claude/settings.json by install.sh. Routine spawns run without a prompt; spawns that request bypass/yolo mode still ask.",
+  "permissions": {
+    "allow": [
+      "Bash(agent-deck launch *)"
+    ],
+    "ask": [
+      "Bash(agent-deck launch *skip-permissions*)",
+      "Bash(agent-deck launch *yolo*)",
+      "Bash(agent-deck launch *dangerously*)"
+    ]
+  }
+}
