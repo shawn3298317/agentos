@@ -122,6 +122,11 @@ install_packages_macos() {
     [ -x /usr/local/bin/brew ] && eval "$(/usr/local/bin/brew shellenv)"
   fi
   step "brew bundle"
+  # Homebrew >= 7 refuses formulae from non-official taps until trusted. Trust only the one
+  # formula the Brewfile installs (arm64 only), not the whole tap.
+  if [ "$(uname -m)" = arm64 ] && brew trust --help >/dev/null 2>&1; then
+    run brew trust --formula asheshgoplani/tap/agent-deck || warn "brew trust failed; brew bundle may refuse agent-deck"
+  fi
   HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --no-upgrade --file="$AGENTOS_REPO/Brewfile" \
     || warn "brew bundle reported failures (Tier 3 source builds?); continuing with what installed"
   # Everything below needs these; fail here rather than half-install dotfiles.
@@ -144,7 +149,8 @@ install_agent_deck_release() {
   step "agent-deck $v from GitHub release"
   if [ "$DRY_RUN" = 1 ]; then note "[dry-run] curl $url"; return 0; fi
   tmp="$(mktemp -d)"
-  curl -fsSL "$url" -o "$tmp/ad.tgz" || die "download failed: $url"
+  # GitHub release downloads intermittently 5xx; retry before giving up.
+  curl -fsSL --retry 4 --retry-delay 5 --retry-all-errors "$url" -o "$tmp/ad.tgz" || die "download failed: $url"
   tar -xzf "$tmp/ad.tgz" -C "$tmp" agent-deck
   mkdir -p "$BIN_DIR"; install -m 0755 "$tmp/agent-deck" "$BIN_DIR/agent-deck"; rm -rf "$tmp"
   ok "installed $BIN_DIR/agent-deck"
