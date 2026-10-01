@@ -123,7 +123,10 @@ install_packages_macos() {
   fi
   step "brew bundle"
   HOMEBREW_NO_AUTO_UPDATE=0 run brew bundle --no-upgrade --file="$AGENTOS_REPO/Brewfile" \
-    || warn "brew bundle reported failures (Tier 3 source builds?); continuing, version check below is the gate"
+    || warn "brew bundle reported failures (Tier 3 source builds?); continuing with what installed"
+  # Everything below needs these; fail here rather than half-install dotfiles.
+  local b
+  for b in git tmux jq; do have "$b" || die "$b missing after brew bundle; fix with: brew install $b"; done
   # Brewfile skips agent-deck on Intel; also covers a failed brew build.
   local adv=""
   have agent-deck && adv="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
@@ -178,7 +181,7 @@ step "Version check"
 if have agent-deck; then
   ADV="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
   if version_ge "$ADV" "$AGENT_DECK_MIN"; then ok "agent-deck $ADV (>= $AGENT_DECK_MIN)"
-  else die "agent-deck $ADV is older than $AGENT_DECK_MIN; run: brew upgrade agent-deck"; fi
+  else die "agent-deck $ADV at $(command -v agent-deck) is older than $AGENT_DECK_MIN; remove it or put $BIN_DIR first on PATH, then re-run ./install.sh"; fi
 else
   [ "$DRY_RUN" = 1 ] && warn "agent-deck not installed (dry-run)" || die "agent-deck not installed"
 fi
@@ -289,8 +292,9 @@ if [ "$CONDUCTORS" = 1 ]; then
           | .permissions.allow = (((($cur.permissions.allow // []) + ($o.allow // []))) | uniq_arr)
           | .permissions.ask = (((($cur.permissions.ask // []) - ($o.allow // [])) + ($o.ask // [])) | uniq_arr)
         ' "$d/.claude/settings.json" "$P" >"$d/.claude/settings.json.tmp" \
-          && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json"
-        ok "conductor $name: permission overlay applied"
+          && mv "$d/.claude/settings.json.tmp" "$d/.claude/settings.json" \
+          && ok "conductor $name: permission overlay applied" \
+          || { rm -f "$d/.claude/settings.json.tmp"; warn "conductor $name: permission overlay failed to merge ($P)"; }
       fi
       manifest_add "conductor	$name"
     fi

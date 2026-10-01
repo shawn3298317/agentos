@@ -34,11 +34,13 @@ agentos uninstall --purge   # removes links/configs, restores backups, kills age
 
 | Piece | Where | How |
 |---|---|---|
-| Homebrew packages: git, tmux, jq, gh, node, rg, fd, terminal-notifier, agent-deck; casks ghostty, JetBrains Mono, claude-code | system | `Brewfile` |
+| Homebrew packages: git, tmux, jq, gh, node, rg, fd; casks ghostty, JetBrains Mono, claude-code. On Apple Silicon also terminal-notifier and agent-deck | system | `Brewfile` (`brew bundle --no-upgrade`: already-installed packages are left alone) |
+| agent-deck on Intel Macs (Homebrew has no bottles there, so the formula is a long source build), or when brew's copy is missing/too old | `~/.local/bin/agent-deck` | pinned prebuilt GitHub release (`versions.env`) |
 | Ghostty config | `~/.config/ghostty/config` | symlink → `ghostty/config` |
 | agent-deck config | `~/.config/agent-deck/config.toml` | rendered copy of `agent-deck/config.toml` (the TUI rewrites it atomically, so it can't be a symlink) |
 | Conductors `fleet-spawner`, `reviewer` | `~/.agent-deck/conductor/<name>/` | `agent-deck conductor setup` with `CLAUDE.md` symlinked to the repo; installs the launchd heartbeat |
 | Conductor state hooks | `<conductor>/.claude/settings.json` | merged next to agent-deck's own permission policy |
+| Conductor permission overlay (fleet-spawner: spawns run without a prompt; bypass/yolo spawns still ask) | `<conductor>/.claude/settings.json` | `agent-deck/conductor/<name>/permissions.json` merged after `conductor setup`, which rewrites the managed policy |
 | Claude Code | `~/.claude/` | `settings.base.json` **merged** into `settings.json`; `CLAUDE.md`, `skills/*`, `commands/*`, `agents/*`, `hooks/*` symlinked |
 | `agentos`, `agentos-conductor-hook` | `~/.local/bin/` | symlinks |
 

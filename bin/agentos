@@ -27,7 +27,9 @@ cmd_status() {
   for d in "$CONDUCTOR_ROOT"/*/; do
     [ -f "$d/meta.json" ] || continue
     name="$(basename "$d")"
-    hb="$d/heartbeat.log"
+    # agent-deck >= 1.16 heartbeats are delta-only: a quiet tick prints nothing to
+    # heartbeat.log but always rewrites heartbeat-tick.json.
+    hb="$d/heartbeat-tick.json"; [ -e "$hb" ] || hb="$d/heartbeat.log"
     if [ -s "$hb" ]; then
       age=$(( $(date +%s) - $(stat -c %Y "$hb" 2>/dev/null || stat -f %m "$hb") ))
       note "$name: last heartbeat $((age / 60))m ago; log entries: $(grep -c '' "$d/task-log.md" 2>/dev/null || echo 0) lines"
@@ -47,7 +49,7 @@ cmd_doctor() {
   soft "gh on PATH" "have gh"
   if have agent-deck; then
     v="$(agent-deck --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-    check "agent-deck $v >= $AGENT_DECK_MIN" "version_ge '$v' '$AGENT_DECK_MIN'" "brew upgrade agent-deck"
+    check "agent-deck $v >= $AGENT_DECK_MIN" "version_ge '$v' '$AGENT_DECK_MIN'" "re-run ./install.sh (installs the pinned release)"
   fi
 
   step "Config"
@@ -55,6 +57,10 @@ cmd_doctor() {
   check "agent-deck config parses" "agent-deck conductor list --json"
   soft  "config matches repo" "cmp -s <(sed -e 's|__HOME__|$HOME|g' '$REPO/agent-deck/config.toml') '$HOME/.config/agent-deck/config.toml'" \
         "the TUI rewrote it; diff with the repo copy and commit what you want to keep"
+  if is_macos; then
+    check "Ghostty.app installed" "[ -d /Applications/Ghostty.app ] || [ -d '$HOME/Applications/Ghostty.app' ]" \
+          "brew install --cask ghostty"
+  fi
   check "ghostty config linked" "[ \"\$(readlink '$HOME/.config/ghostty/config')\" = '$REPO/ghostty/config' ]"
   check "~/.claude/settings.json valid JSON" "jq -e . '$HOME/.claude/settings.json'"
   soft  "agent-deck Claude hooks installed" "jq -e '.hooks // {} | tostring | test(\"agent-deck\")' '$HOME/.claude/settings.json'" \
@@ -72,7 +78,7 @@ cmd_doctor() {
       soft "$name: heartbeat launchd job loaded" "launchctl list | grep -F 'com.agentdeck.conductor-heartbeat.$name' >/dev/null" \
            "agent-deck conductor setup $name --json   (re-installs the plist)"
     fi
-    soft "$name: heartbeat fired (log non-empty)" "[ -s '$d/heartbeat.log' ]" "wait one interval, or check: agent-deck conductor status $name"
+    soft "$name: heartbeat fired" "[ -e '$d/heartbeat-tick.json' ] || [ -s '$d/heartbeat.log' ]" "wait one interval, or check: agent-deck conductor status $name"
   done
 
   step "Auth"
