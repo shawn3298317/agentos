@@ -69,7 +69,7 @@ cmd_doctor() {
     check "$name: agentos hooks wired" "jq -e '.hooks.Stop' '$d/.claude/settings.json'"
     check "$name: heartbeat enabled" "jq -e '.heartbeat_enabled == true' '$d/meta.json'"
     if is_macos; then
-      soft "$name: heartbeat launchd job loaded" "launchctl list | grep -q 'com.agentdeck.conductor-heartbeat.$name'" \
+      soft "$name: heartbeat launchd job loaded" "launchctl list | grep -F 'com.agentdeck.conductor-heartbeat.$name' >/dev/null" \
            "agent-deck conductor setup $name --json   (re-installs the plist)"
     fi
     soft "$name: heartbeat fired (log non-empty)" "[ -s '$d/heartbeat.log' ]" "wait one interval, or check: agent-deck conductor status $name"
