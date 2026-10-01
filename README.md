@@ -48,6 +48,24 @@ Anything that already exists gets backed up to `~/.local/state/agentos/backups/`
 replaced. Everything agentos creates is recorded in `~/.local/state/agentos/manifest`, and
 uninstall uses that manifest to undo it.
 
+## Skills
+
+Harness-neutral skills live in `skills/` (the [Agent Skills](https://agentskills.io) `SKILL.md` format).
+`claude/skills/<name>` is a relative symlink into it, so `install.sh` links each skill into `~/.claude/skills/`
+with no installer change. Other harnesses read the same files from their own directory; with
+[`npx skills`](https://github.com/vercel-labs/skills) (it knows each harness's path):
+
+```sh
+npx skills add shawn3298317/agentos --skill mega-review -g -a codex -a pi -a opencode   # -g = user-level
+```
+
+| Skill | What it does |
+|---|---|
+| [`mega-review`](skills/mega-review/SKILL.md) | First-layer gate for a GitHub PR (drafts included): vendored upstream reviewers run as read-only lenses over several passes, every finding is cross-verified by majority vote, and one review (summary + inline comments) is posted. Dry run by default. GitHub access goes through [gh-axi](https://github.com/kunchenguid/gh-axi). |
+
+The `SKILL.md` loads in any of those harnesses, but `mega-review`'s driver runs its models through the
+`claude` CLI wherever it is invoked from, so `claude` must be installed and logged in.
+
 ## Decisions baked into the config
 
 - **agent-deck ≥ 1.16** (`versions.env`), because 0.27 never ran conductor heartbeats. 1.16 installs a
